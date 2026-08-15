@@ -1,0 +1,386 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Enums
+enum Role {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ExpenseCategory {
+  RENT
+  ELECTRICITY
+  WATER
+  INTERNET
+  GROCERIES
+  GAS
+  CLEANING
+  FOOD
+  MAINTENANCE
+  OTHER
+}
+
+enum SplitType {
+  EQUAL
+  CUSTOM
+  PERCENTAGE
+  MANUAL
+}
+
+enum PaymentMethod {
+  UPI
+  QR
+  BANK_TRANSFER
+  CASH
+  WALLET
+  RAZORPAY
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REPAID
+  OVERDUE
+}
+
+enum NotificationType {
+  EXPENSE_ADDED
+  PAYMENT_RECEIVED
+  DUE_REMINDER
+  LOAN_REQUEST
+  LOAN_APPROVED
+  LOAN_REJECTED
+  WALLET_LOW
+  ROOM_INVITE
+  MEMBER_JOINED
+  MEMBER_LEFT
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  EXPENSE
+}
+
+// Models
+model User {
+  id             String          @id @default(cuid())
+  name           String?
+  email          String          @unique
+  emailVerified  DateTime?
+  password       String?
+  image          String?
+  phone          String?
+  creditScore    Int             @default(700)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  roomMembers    RoomMember[]
+  expensesPaid   Expense[]       @relation("ExpensePaidBy")
+  expenseSplits  ExpenseSplit[]
+  walletTxns     WalletTransaction[]
+  paymentsSent   Payment[]       @relation("PaymentSender")
+  paymentsRecv   Payment[]       @relation("PaymentReceiver")
+  notifications  Notification[]
+  loansBorrowed  Loan[]          @relation("LoanBorrower")
+  loansLent      Loan[]          @relation("LoanLender")
+  loanRepayments LoanRepayment[]
+  creditHistory  CreditHistory[]
+  auditLogs      AuditLog[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Room {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  maxMembers  Int      @default(6)
+  isLocked    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     RoomMember[]
+  expenses    Expense[]
+  wallet      Wallet?
+  recurring   RecurringExpense[]
+  inviteCodes InviteCode[]
+  auditLogs   AuditLog[]
+
+  @@map("rooms")
+}
+
+model RoomMember {
+  id        String   @id @default(cuid())
+  userId    String
+  roomId    String
+  role      Role     @default(MEMBER)
+  joinedAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roomId])
+  @@map("room_members")
+}
+
+model Expense {
+  id          String          @id @default(cuid())
+  title       String
+  amount      Float
+  category    ExpenseCategory
+  description String?
+  proofImage  String?
+  splitType   SplitType       @default(EQUAL)
+  date        DateTime        @default(now())
+  dueDate     DateTime?
+  isPaid      Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  paidById    String
+  paidBy      User            @relation("ExpensePaidBy", fields: [paidById], references: [id])
+  roomId      String
+  room        Room            @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  splits      ExpenseSplit[]
+  payments    Payment[]
+
+  @@index([roomId])
+  @@index([paidById])
+  @@index([category])
+  @@index([date])
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id        String  @id @default(cuid())
+  amount    Float
+  isPaid    Boolean @default(false)
+  paidAt    DateTime?
+
+  expenseId String
+  expense   Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User    @relation(fields: [userId], references: [id])
+
+  @@unique([expenseId, userId])
+  @@map("expense_splits")
+}
+
+model Wallet {
+  id        String   @id @default(cuid())
+  balance   Float    @default(0)
+  roomId    String   @unique
+  room      Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id          String          @id @default(cuid())
+  amount      Float
+  type        TransactionType
+  description String?
+  createdAt   DateTime        @default(now())
+
+  walletId String
+  wallet   Wallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User   @relation(fields: [userId], references: [id])
+
+  @@index([walletId])
+  @@map("wallet_transactions")
+}
+
+model RecurringExpense {
+  id        String          @id @default(cuid())
+  title     String
+  amount    Float
+  category  ExpenseCategory
+  dayOfMonth Int            @default(1)
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("recurring_expenses")
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  amount        Float
+  method        PaymentMethod
+  status        PaymentStatus @default(PENDING)
+  transactionId String?
+  receiptUrl    String?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  senderId   String
+  sender     User    @relation("PaymentSender", fields: [senderId], references: [id])
+  receiverId String
+  receiver   User    @relation("PaymentReceiver", fields: [receiverId], references: [id])
+  expenseId  String?
+  expense    Expense? @relation(fields: [expenseId], references: [id])
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@map("payments")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  type      NotificationType
+  title     String
+  message   String
+  isRead    Boolean          @default(false)
+  data      Json?
+  createdAt DateTime         @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+model Loan {
+  id            String     @id @default(cuid())
+  amount        Float
+  reason        String
+  interestRate  Float      @default(0)
+  status        LoanStatus @default(PENDING)
+  repaymentDate DateTime
+  approvedAt    DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  borrowerId String
+  borrower   User   @relation("LoanBorrower", fields: [borrowerId], references: [id])
+  lenderId   String?
+  lender     User?  @relation("LoanLender", fields: [lenderId], references: [id])
+
+  repayments LoanRepayment[]
+
+  @@index([borrowerId])
+  @@map("loans")
+}
+
+model LoanRepayment {
+  id        String   @id @default(cuid())
+  amount    Float
+  createdAt DateTime @default(now())
+
+  loanId String
+  loan   Loan   @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@map("loan_repayments")
+}
+
+model CreditHistory {
+  id          String   @id @default(cuid())
+  scoreBefore Int
+  scoreAfter  Int
+  reason      String
+  createdAt   DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("credit_history")
+}
+
+model InviteCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  isUsed    Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("invite_codes")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  userId String?
+  user   User?  @relation(fields: [userId], references: [id])
+  roomId String?
+  room   Room?  @relation(fields: [roomId], references: [id])
+
+  @@index([userId])
+  @@index([roomId])
+  @@map("audit_logs")
+}
